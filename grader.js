@@ -22,6 +22,7 @@ References:
 */
 
 var fs = require('fs');
+var rest = require('restler');
 var program = require('commander');
 var cheerio = require('cheerio');
 var HTMLFILE_DEFAULT = "index.html";
@@ -35,6 +36,9 @@ var assertFileExists = function(infile) {
     }
     return instr;
 };
+var assertUrlExists = function(url) {
+   return url;
+};
 
 var cheerioHtmlFile = function(htmlfile) {
     return cheerio.load(fs.readFileSync(htmlfile));
@@ -44,8 +48,17 @@ var loadChecks = function(checksfile) {
     return JSON.parse(fs.readFileSync(checksfile));
 };
 
+var fetchFileContentAndExecute = function(htmlfile, contentfn) {
+  var content = fs.readFileSync(htmlfile, "UTF-8");
+  contentfn(content);
+};
+  
 var checkHtmlFile = function(htmlfile, checksfile) {
-    $ = cheerioHtmlFile(htmlfile);
+    var content = fs.readFileSync(htmlfile, "UTF-8");
+    return checkContent(content, checksfile);
+};
+var checkContent  = function(content, checksfile) {
+    $ = cheerio.load("'"+content+"'");
     var checks = loadChecks(checksfile).sort();
     var out = {};
     for(var ii in checks) {
@@ -55,20 +68,47 @@ var checkHtmlFile = function(htmlfile, checksfile) {
     return out;
 };
 
+
 var clone = function(fn) {
     // Workaround for commander.js issue.
     // http://stackoverflow.com/a/6772648
     return fn.bind({});
 };
 
+var fetchURLContentAndExecute = function(url, next) { 
+  rest.get(url).on('complete', function(result) {
+  if (result instanceof Error) {
+    sys.puts('Error: ' + result.message);
+    //console.log(result);
+    this.retry(5000); // try again after 5 sec
+  } else {
+//    console.log(result);
+    next(result);
+  }
+});
+    //console.log("requested "+url);
+}
+
+
 if(require.main == module) {
     program
         .option('-c, --checks <check_file>', 'Path to checks.json', clone(assertFileExists), CHECKSFILE_DEFAULT)
-        .option('-f, --file <html_file>', 'Path to index.html', clone(assertFileExists), HTMLFILE_DEFAULT)
+        .option('-f, --file <html_file>', 'Path to index.html', clone(assertFileExists))
+        .option('-u, --url <url>', 'URL to index.html', clone(assertUrlExists))
         .parse(process.argv);
-    var checkJson = checkHtmlFile(program.file, program.checks);
-    var outJson = JSON.stringify(checkJson, null, 4);
-    console.log(outJson);
+    //console.log(program);
+    var contentfn = function(content) {
+      var checkJson = checkContent(content, program.checks);
+      var outJson = JSON.stringify(checkJson, null, 4);
+      console.log(outJson);
+    };
+
+    if (program.file) {
+      fetchFileContentAndExecute(program.file, contentfn);
+    }
+    else {
+      fetchURLContentAndExecute(program.url, contentfn);
+    }
 } else {
     exports.checkHtmlFile = checkHtmlFile;
 }
